@@ -6,6 +6,7 @@ This guide explains how to configure the Aztec monitoring script to send notific
 
 - A Slack workspace where you have permissions to create apps/webhooks
 - The Aztec monitoring script installed on your server
+- `jq` installed on your system (the script will attempt to install it if missing)
 
 ## Step 1: Create a Slack Incoming Webhook
 
