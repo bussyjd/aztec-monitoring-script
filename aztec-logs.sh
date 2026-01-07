@@ -3500,11 +3500,12 @@ send_slack_message() {
   local message="\$1"
   if [ -n "\$SLACK_WEBHOOK_URL" ]; then
     # Convert Telegram-style formatting to Slack mrkdwn
-    # Replace %0A with actual newlines for JSON
-    local slack_text=\$(echo "\$message" | sed 's/%0A/\\n/g')
+    # Replace %0A with actual newlines for jq
+    local clean_message=\$(echo "\$message" | sed 's/%0A/\n/g')
+    local json_payload=\$(jq -n --arg text "\$clean_message" '{"text": \$text}')
     curl -s -X POST "\$SLACK_WEBHOOK_URL" \\
       -H "Content-Type: application/json" \\
-      -d '{"text":"'"\$slack_text"'"}' >/dev/null
+      -d "\$json_payload" >/dev/null
   fi
 }
 
@@ -5087,9 +5088,10 @@ send_unified_notification() {
     # Send to Slack if channel is 2 or 3
     if [ "$NOTIFICATION_CHANNEL" == "2" ] || [ "$NOTIFICATION_CHANNEL" == "3" ]; then
         if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            local json_payload=$(jq -n --arg text "$message" '{"text": $text}')
             curl -s -X POST "$SLACK_WEBHOOK_URL" \
                 -H "Content-Type: application/json" \
-                -d '{"text":"'"$message"'"}' > /dev/null
+                -d "$json_payload" > /dev/null
             sent=true
         fi
     fi
@@ -5302,9 +5304,10 @@ create_monitor_script(){
     fi
     if [ "$NOTIFICATION_CHANNEL" == "2" ] || [ "$NOTIFICATION_CHANNEL" == "3" ]; then
         if [ -n "${SLACK_WEBHOOK_URL-}" ]; then
+            local json_payload=$(jq -n --arg text "$start_message" '{"text": $text}')
             curl -s -X POST "$SLACK_WEBHOOK_URL" \
                 -H "Content-Type: application/json" \
-                -d '{"text":"'"$start_message"'"}' >/dev/null 2>&1
+                -d "$json_payload" >/dev/null 2>&1
         fi
     fi
 
@@ -5357,9 +5360,10 @@ send_slack(){
         log_message "No Slack webhook"
         return 1
     fi
+    local json_payload=$(jq -n --arg text "$message" '{"text": $text}')
     curl -s -X POST "$SLACK_WEBHOOK_URL" \
         -H "Content-Type: application/json" \
-        -d '{"text":"'"$message"'"}' >/dev/null
+        -d "$json_payload" >/dev/null
 }
 
 send_notification(){
