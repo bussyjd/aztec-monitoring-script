@@ -3148,9 +3148,17 @@ create_systemd_agent() {
       return 1
     fi
     # Test webhook by sending a test message
+    local test_message=$(t "slack_linked")
+    local json_payload
+    if command -v jq >/dev/null 2>&1; then
+      json_payload=$(jq -n --arg text "$test_message" '{"text": $text}')
+    else
+      local escaped=$(echo "$test_message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+      json_payload="{\"text\": \"$escaped\"}"
+    fi
     local response=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$webhook_url" \
       -H "Content-Type: application/json" \
-      -d '{"text":"'"$(t "slack_linked")"'"}')
+      -d "$json_payload")
 
     if [[ "$response" == "200" ]]; then
       return 0
@@ -3463,10 +3471,17 @@ if [ "\$current_size" -gt "\$MAX_SIZE" ]; then
   # Send to Slack if channel is 2 or 3
   if [ "\$NOTIFICATION_CHANNEL" == "2" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ]; then
     if [ -n "\$SLACK_WEBHOOK_URL" ]; then
-      slack_text=\$(echo "\$message" | sed 's/%0A/\\n/g')
+      local clean_message=\$(echo "\$message" | sed 's/%0A/\n/g')
+      local json_payload
+      if command -v jq >/dev/null 2>&1; then
+        json_payload=\$(jq -n --arg text "\$clean_message" '{"text": \$text}')
+      else
+        local escaped=\$(echo "\$clean_message" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | tr '\n' ' ')
+        json_payload="{\"text\": \"\$escaped\"}"
+      fi
       curl -s -X POST "\$SLACK_WEBHOOK_URL" \\
         -H "Content-Type: application/json" \\
-        -d '{"text":"'"\$slack_text"'"}' >/dev/null
+        -d "\$json_payload" >/dev/null
     fi
   fi
 else
@@ -3500,9 +3515,15 @@ send_slack_message() {
   local message="\$1"
   if [ -n "\$SLACK_WEBHOOK_URL" ]; then
     # Convert Telegram-style formatting to Slack mrkdwn
-    # Replace %0A with actual newlines for jq
     local clean_message=\$(echo "\$message" | sed 's/%0A/\n/g')
-    local json_payload=\$(jq -n --arg text "\$clean_message" '{"text": \$text}')
+    local json_payload
+    if command -v jq >/dev/null 2>&1; then
+      json_payload=\$(jq -n --arg text "\$clean_message" '{"text": \$text}')
+    else
+      # Fallback: basic escaping for JSON (escape backslashes, quotes, and newlines)
+      local escaped=\$(echo "\$clean_message" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | tr '\n' ' ')
+      json_payload="{\"text\": \"\$escaped\"}"
+    fi
     curl -s -X POST "\$SLACK_WEBHOOK_URL" \\
       -H "Content-Type: application/json" \\
       -d "\$json_payload" >/dev/null
@@ -5088,7 +5109,14 @@ send_unified_notification() {
     # Send to Slack if channel is 2 or 3
     if [ "$NOTIFICATION_CHANNEL" == "2" ] || [ "$NOTIFICATION_CHANNEL" == "3" ]; then
         if [ -n "$SLACK_WEBHOOK_URL" ]; then
-            local json_payload=$(jq -n --arg text "$message" '{"text": $text}')
+            local json_payload
+            if command -v jq >/dev/null 2>&1; then
+                json_payload=$(jq -n --arg text "$message" '{"text": $text}')
+            else
+                # Fallback: basic escaping for JSON
+                local escaped=$(echo "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+                json_payload="{\"text\": \"$escaped\"}"
+            fi
             curl -s -X POST "$SLACK_WEBHOOK_URL" \
                 -H "Content-Type: application/json" \
                 -d "$json_payload" > /dev/null
@@ -5304,7 +5332,13 @@ create_monitor_script(){
     fi
     if [ "$NOTIFICATION_CHANNEL" == "2" ] || [ "$NOTIFICATION_CHANNEL" == "3" ]; then
         if [ -n "${SLACK_WEBHOOK_URL-}" ]; then
-            local json_payload=$(jq -n --arg text "$start_message" '{"text": $text}')
+            local json_payload
+            if command -v jq >/dev/null 2>&1; then
+                json_payload=$(jq -n --arg text "$start_message" '{"text": $text}')
+            else
+                local escaped=$(echo "$start_message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+                json_payload="{\"text\": \"$escaped\"}"
+            fi
             curl -s -X POST "$SLACK_WEBHOOK_URL" \
                 -H "Content-Type: application/json" \
                 -d "$json_payload" >/dev/null 2>&1
@@ -5360,7 +5394,13 @@ send_slack(){
         log_message "No Slack webhook"
         return 1
     fi
-    local json_payload=$(jq -n --arg text "$message" '{"text": $text}')
+    local json_payload
+    if command -v jq >/dev/null 2>&1; then
+        json_payload=$(jq -n --arg text "$message" '{"text": $text}')
+    else
+        local escaped=$(echo "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+        json_payload="{\"text\": \"$escaped\"}"
+    fi
     curl -s -X POST "$SLACK_WEBHOOK_URL" \
         -H "Content-Type: application/json" \
         -d "$json_payload" >/dev/null
