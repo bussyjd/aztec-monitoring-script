@@ -3471,13 +3471,13 @@ if [ "\$current_size" -gt "\$MAX_SIZE" ]; then
 	  # Send to Slack if channel is 2 or 3
 	  if [ "\$NOTIFICATION_CHANNEL" == "2" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ]; then
 	    if [ -n "\$SLACK_WEBHOOK_URL" ]; then
-	      clean_message=\$(echo "\$message" | sed 's/%0A/\n/g')
+	      clean_message=\$(printf '%s' "\$message" | sed 's/%0A/\n/g')
 	      # Convert Telegram Markdown links ([text](url)) to Slack mrkdwn (<url|text>)
-	      clean_message=\$(echo "\$clean_message" | sed -E 's/\\[([^]]+)\\]\\((https?:\\/\\/[^)]+)\\)/<\\2|\\1>/g')
+	      clean_message=\$(printf '%s' "\$clean_message" | sed -E 's/\\[([^]]+)\\]\\((https?:\\/\\/[^)]+)\\)/<\\2|\\1>/g')
 	      if command -v jq >/dev/null 2>&1; then
 	        json_payload=\$(jq -n --arg text "\$clean_message" '{"text": \$text}')
 	      else
-	        escaped=\$(echo "\$clean_message" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | tr '\n' ' ')
+	        escaped=\$(printf '%s' "\$clean_message" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | tr '\n' ' ')
 	        json_payload="{\"text\": \"\$escaped\"}"
 	      fi
 	      curl -s -X POST "\$SLACK_WEBHOOK_URL" \\
@@ -3516,22 +3516,30 @@ send_telegram_message() {
 	  local message="\$1"
 	  if [ -n "\$SLACK_WEBHOOK_URL" ]; then
 	    # Convert Telegram-style formatting to Slack mrkdwn
-	    local clean_message=\$(echo "\$message" | sed 's/%0A/\n/g')
+	    local clean_message=\$(printf '%s' "\$message" | sed 's/%0A/\n/g')
 	    # Convert Telegram Markdown links ([text](url)) to Slack mrkdwn (<url|text>)
-	    clean_message=\$(echo "\$clean_message" | sed -E 's/\\[([^]]+)\\]\\((https?:\\/\\/[^)]+)\\)/<\\2|\\1>/g')
+	    clean_message=\$(printf '%s' "\$clean_message" | sed -E 's/\\[([^]]+)\\]\\((https?:\\/\\/[^)]+)\\)/<\\2|\\1>/g')
 	    local json_payload
 	    if command -v jq >/dev/null 2>&1; then
 	      json_payload=\$(jq -n --arg text "\$clean_message" '{"text": \$text}')
 	    else
 	      # Fallback: basic escaping for JSON (escape backslashes, quotes, and newlines)
-      local escaped=\$(echo "\$clean_message" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | tr '\n' ' ')
-      json_payload="{\"text\": \"\$escaped\"}"
-    fi
-    curl -s -X POST "\$SLACK_WEBHOOK_URL" \\
-      -H "Content-Type: application/json" \\
-      -d "\$json_payload" >/dev/null
-  fi
-}
+	      local escaped=\$(printf '%s' "\$clean_message" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | tr '\n' ' ')
+	      json_payload="{\"text\": \"\$escaped\"}"
+	    fi
+	    local http_code
+	    http_code=\$(curl -s -o /dev/null -w "%{http_code}" -X POST "\$SLACK_WEBHOOK_URL" \\
+	      -H "Content-Type: application/json" \\
+	      -d "\$json_payload") || {
+	      log "Slack notification failed (curl error)"
+	      return 1
+	    }
+	    if [[ "\$http_code" != "200" ]]; then
+	      log "Slack notification failed (HTTP \$http_code)"
+	      return 1
+	    fi
+	  fi
+	}
 
 # === Unified notification function based on NOTIFICATION_CHANNEL ===
 send_notification() {
@@ -5403,28 +5411,43 @@ send_telegram(){
         log_message "No Telegram tokens"
         return 1
     fi
-    curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
-        -d chat_id="$TELEGRAM_CHAT_ID" -d text="$message" -d parse_mode="Markdown" >/dev/null
+    curl -s --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" \
+        -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+        -d chat_id="$TELEGRAM_CHAT_ID" -d text="$message" -d parse_mode="Markdown" >/dev/null 2>&1 || {
+        log_message "Telegram send failed"
+        return 1
+    }
 }
 
-	send_slack(){
-	    local message="$1"
-	    if [ -z "$SLACK_WEBHOOK_URL" ]; then
-	        log_message "No Slack webhook"
-	        return 1
-	    fi
-	    # Convert Telegram Markdown links ([text](url)) to Slack mrkdwn (<url|text>)
-	    message=$(echo "$message" | sed -E 's/\\[([^]]+)\\]\\((https?:\\/\\/[^)]+)\\)/<\\2|\\1>/g')
-	    local json_payload
-	    if command -v jq >/dev/null 2>&1; then
-	        json_payload=$(jq -n --arg text "$message" '{"text": $text}')
-	    else
-	        local escaped=$(echo "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+send_slack(){
+    local message="$1"
+    if [ -z "$SLACK_WEBHOOK_URL" ]; then
+        log_message "No Slack webhook"
+        return 1
+    fi
+    # Convert agent-style %0A newlines (if present)
+    message=${message//%0A/$'\n'}
+    # Convert Telegram Markdown links ([text](url)) to Slack mrkdwn (<url|text>)
+    message=$(printf '%s' "$message" | sed -E 's/\[([^]]+)\]\((https?:\/\/[^)]+)\)/<\2|\1>/g')
+    local json_payload
+    if command -v jq >/dev/null 2>&1; then
+        json_payload=$(jq -n --arg text "$message" '{"text": $text}')
+    else
+        local escaped=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
         json_payload="{\"text\": \"$escaped\"}"
     fi
-    curl -s -X POST "$SLACK_WEBHOOK_URL" \
+    local http_code
+    http_code=$(curl -s --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -o /dev/null -w "%{http_code}" \
+        -X POST "$SLACK_WEBHOOK_URL" \
         -H "Content-Type: application/json" \
-        -d "$json_payload" >/dev/null
+        -d "$json_payload" 2>/dev/null) || {
+        log_message "Slack send failed (curl error)"
+        return 1
+    }
+    if [[ "$http_code" != "200" ]]; then
+        log_message "Slack webhook returned HTTP $http_code"
+        return 1
+    fi
 }
 
 send_notification(){
@@ -5498,7 +5521,7 @@ monitor_position(){
 ⚠️ *Issue:* Possible problems with Dashtec API
 📞 *Contact developer:* https://t.me/+zEaCtoXYYwIyZjQ0"
 
-        send_notification "$message"
+        send_notification "$message" || log_message "Failed to send API error notification ($error_type)"
     }
 
     # Формируем URL для очереди в зависимости от сети
