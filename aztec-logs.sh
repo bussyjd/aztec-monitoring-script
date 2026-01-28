@@ -3468,22 +3468,23 @@ if [ "\$current_size" -gt "\$MAX_SIZE" ]; then
         -d parse_mode="Markdown" >/dev/null
     fi
   fi
-  # Send to Slack if channel is 2 or 3
-  if [ "\$NOTIFICATION_CHANNEL" == "2" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ]; then
-    if [ -n "\$SLACK_WEBHOOK_URL" ]; then
-      local clean_message=\$(echo "\$message" | sed 's/%0A/\n/g')
-      local json_payload
-      if command -v jq >/dev/null 2>&1; then
-        json_payload=\$(jq -n --arg text "\$clean_message" '{"text": \$text}')
-      else
-        local escaped=\$(echo "\$clean_message" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | tr '\n' ' ')
-        json_payload="{\"text\": \"\$escaped\"}"
-      fi
-      curl -s -X POST "\$SLACK_WEBHOOK_URL" \\
-        -H "Content-Type: application/json" \\
-        -d "\$json_payload" >/dev/null
-    fi
-  fi
+	  # Send to Slack if channel is 2 or 3
+	  if [ "\$NOTIFICATION_CHANNEL" == "2" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ]; then
+	    if [ -n "\$SLACK_WEBHOOK_URL" ]; then
+	      clean_message=\$(echo "\$message" | sed 's/%0A/\n/g')
+	      # Convert Telegram Markdown links ([text](url)) to Slack mrkdwn (<url|text>)
+	      clean_message=\$(echo "\$clean_message" | sed -E 's/\\[([^]]+)\\]\\((https?:\\/\\/[^)]+)\\)/<\\2|\\1>/g')
+	      if command -v jq >/dev/null 2>&1; then
+	        json_payload=\$(jq -n --arg text "\$clean_message" '{"text": \$text}')
+	      else
+	        escaped=\$(echo "\$clean_message" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | tr '\n' ' ')
+	        json_payload="{\"text\": \"\$escaped\"}"
+	      fi
+	      curl -s -X POST "\$SLACK_WEBHOOK_URL" \\
+	        -H "Content-Type: application/json" \\
+	        -d "\$json_payload" >/dev/null
+	    fi
+	  fi
 else
   {
     echo "="
@@ -3511,16 +3512,18 @@ send_telegram_message() {
 }
 
 # === Функция для отправки уведомлений в Slack ===
-send_slack_message() {
-  local message="\$1"
-  if [ -n "\$SLACK_WEBHOOK_URL" ]; then
-    # Convert Telegram-style formatting to Slack mrkdwn
-    local clean_message=\$(echo "\$message" | sed 's/%0A/\n/g')
-    local json_payload
-    if command -v jq >/dev/null 2>&1; then
-      json_payload=\$(jq -n --arg text "\$clean_message" '{"text": \$text}')
-    else
-      # Fallback: basic escaping for JSON (escape backslashes, quotes, and newlines)
+	send_slack_message() {
+	  local message="\$1"
+	  if [ -n "\$SLACK_WEBHOOK_URL" ]; then
+	    # Convert Telegram-style formatting to Slack mrkdwn
+	    local clean_message=\$(echo "\$message" | sed 's/%0A/\n/g')
+	    # Convert Telegram Markdown links ([text](url)) to Slack mrkdwn (<url|text>)
+	    clean_message=\$(echo "\$clean_message" | sed -E 's/\\[([^]]+)\\]\\((https?:\\/\\/[^)]+)\\)/<\\2|\\1>/g')
+	    local json_payload
+	    if command -v jq >/dev/null 2>&1; then
+	      json_payload=\$(jq -n --arg text "\$clean_message" '{"text": \$text}')
+	    else
+	      # Fallback: basic escaping for JSON (escape backslashes, quotes, and newlines)
       local escaped=\$(echo "\$clean_message" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | tr '\n' ' ')
       json_payload="{\"text\": \"\$escaped\"}"
     fi
@@ -3836,19 +3839,27 @@ check_committee() {
       committee_message+="\$(t "status_block_mined")%0A"
       committee_message+="\$(t "status_block_missed")%0A"
       committee_message+="\$(t "status_block_proposed")%0A"
-      committee_message+="%0A\$(t "server_info" "\$ip")%0A"
-      committee_message+="\$(t "time_info" "\$current_time")"
+	      committee_message+="%0A\$(t "server_info" "\$ip")%0A"
+	      committee_message+="\$(t "time_info" "\$current_time")"
 
-      debug_log "Sending committee message for validator \$v_lower: \$committee_message"
-      message_id=\$(send_telegram_message_get_id "\$committee_message")
-      if [ -n "\$message_id" ] && [ "\$message_id" != "null" ]; then
-        echo "\$message_id" > "\$epoch_msg_file"
-      fi
-      printf "%s " "\${slots_arr[@]}" > "\$epoch_state_file"
-      # Очистим файл учета слотов для этого валидатора
-      : > "$AGENT_SCRIPT_PATH/aztec_last_committee_slot_\${v_lower}"
-    done
-    log "Committee selection notification sent for epoch \$epoch: found validators \${found_validators[*]}"
+	      debug_log "Sending committee message for validator \$v_lower: \$committee_message"
+	      message_id=""
+	      # Telegram: keep message_id so we can edit the board in-place
+	      if [ "\$NOTIFICATION_CHANNEL" == "1" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ] || [ -z "\$NOTIFICATION_CHANNEL" ]; then
+	        message_id=\$(send_telegram_message_get_id "\$committee_message")
+	        if [ -n "\$message_id" ] && [ "\$message_id" != "null" ]; then
+	          echo "\$message_id" > "\$epoch_msg_file"
+	        fi
+	      fi
+	      # Slack: incoming webhooks can't edit messages, so send the initial board as a new message
+	      if [ "\$NOTIFICATION_CHANNEL" == "2" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ]; then
+	        send_slack_message "\$committee_message"
+	      fi
+	      printf "%s " "\${slots_arr[@]}" > "\$epoch_state_file"
+	      # Очистим файл учета слотов для этого валидатора
+	      : > "$AGENT_SCRIPT_PATH/aztec_last_committee_slot_\${v_lower}"
+	    done
+	    log "Committee selection notification sent for epoch \$epoch: found validators \${found_validators[*]}"
   else
     debug_log "Already notified for epoch \$epoch"
   fi
@@ -3920,28 +3931,36 @@ check_committee() {
         updated_message+="\$(t "status_attestation_missed")%0A"
         updated_message+="\$(t "status_block_mined")%0A"
         updated_message+="\$(t "status_block_missed")%0A"
-        updated_message+="\$(t "status_block_proposed")%0A"
-        updated_message+="%0A\$(t "server_info" "\$ip")%0A"
-        updated_message+="\$(t "time_info" "\$current_time")"
+	        updated_message+="\$(t "status_block_proposed")%0A"
+	        updated_message+="%0A\$(t "server_info" "\$ip")%0A"
+	        updated_message+="\$(t "time_info" "\$current_time")"
 
-        if [ -f "\$epoch_msg_file" ]; then
-          message_id=\$(cat "\$epoch_msg_file")
-          if [ -n "\$message_id" ]; then
-            debug_log "Editing committee message (id=\$message_id) for epoch \$epoch, slot \$slot, validator \$v_lower"
-            edit_telegram_message "\$message_id" "\$updated_message"
-          else
-            debug_log "Message id missing; sending a fallback message"
-            send_notification "\$updated_message"
-          fi
-        else
-          debug_log "Message id file not found; sending a fallback message"
-          send_notification "\$updated_message"
-        fi
+	        # Telegram: edit original message when possible
+	        if [ "\$NOTIFICATION_CHANNEL" == "1" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ] || [ -z "\$NOTIFICATION_CHANNEL" ]; then
+	          if [ -f "\$epoch_msg_file" ]; then
+	            message_id=\$(cat "\$epoch_msg_file")
+	            if [ -n "\$message_id" ]; then
+	              debug_log "Editing committee message (id=\$message_id) for epoch \$epoch, slot \$slot, validator \$v_lower"
+	              edit_telegram_message "\$message_id" "\$updated_message"
+	            else
+	              debug_log "Message id missing; sending a fallback Telegram message"
+	              send_telegram_message "\$updated_message"
+	            fi
+	          else
+	            debug_log "Message id file not found; sending a fallback Telegram message"
+	            send_telegram_message "\$updated_message"
+	          fi
+	        fi
 
-        echo "\$last_slot_key" >> "\$last_slot_file"
-        debug_log "Updated slot \$slot_idx for epoch \$epoch with icon \$slot_icon for \$v_lower"
-        log "Updated committee stats for epoch \$epoch, slot \$slot, validator \$v_lower"
-      else
+	        # Slack: incoming webhooks can't edit messages, so send a new message for each update
+	        if [ "\$NOTIFICATION_CHANNEL" == "2" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ]; then
+	          send_slack_message "\$updated_message"
+	        fi
+
+	        echo "\$last_slot_key" >> "\$last_slot_file"
+	        debug_log "Updated slot \$slot_idx for epoch \$epoch with icon \$slot_icon for \$v_lower"
+	        log "Updated committee stats for epoch \$epoch, slot \$slot, validator \$v_lower"
+	      else
         debug_log "No mapped status for slot \$slot for \$v_lower"
       fi
     done
@@ -5388,17 +5407,19 @@ send_telegram(){
         -d chat_id="$TELEGRAM_CHAT_ID" -d text="$message" -d parse_mode="Markdown" >/dev/null
 }
 
-send_slack(){
-    local message="$1"
-    if [ -z "$SLACK_WEBHOOK_URL" ]; then
-        log_message "No Slack webhook"
-        return 1
-    fi
-    local json_payload
-    if command -v jq >/dev/null 2>&1; then
-        json_payload=$(jq -n --arg text "$message" '{"text": $text}')
-    else
-        local escaped=$(echo "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+	send_slack(){
+	    local message="$1"
+	    if [ -z "$SLACK_WEBHOOK_URL" ]; then
+	        log_message "No Slack webhook"
+	        return 1
+	    fi
+	    # Convert Telegram Markdown links ([text](url)) to Slack mrkdwn (<url|text>)
+	    message=$(echo "$message" | sed -E 's/\\[([^]]+)\\]\\((https?:\\/\\/[^)]+)\\)/<\\2|\\1>/g')
+	    local json_payload
+	    if command -v jq >/dev/null 2>&1; then
+	        json_payload=$(jq -n --arg text "$message" '{"text": $text}')
+	    else
+	        local escaped=$(echo "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
         json_payload="{\"text\": \"$escaped\"}"
     fi
     curl -s -X POST "$SLACK_WEBHOOK_URL" \
