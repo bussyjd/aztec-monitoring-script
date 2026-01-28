@@ -485,6 +485,18 @@ init_languages() {
   TRANSLATIONS["en,removing_web3signer_data"]="Removing web3signer data..."
   TRANSLATIONS["en,enter_tg_token"]="Enter Telegram bot token: "
   TRANSLATIONS["en,enter_tg_chat_id"]="Enter Telegram chat ID: "
+  TRANSLATIONS["en,slack_webhook_prompt"]="Enter Slack Webhook URL:"
+  TRANSLATIONS["en,slack_webhook_valid"]="✅ Slack webhook is valid"
+  TRANSLATIONS["en,slack_webhook_invalid"]="❌ Invalid Slack webhook URL"
+  TRANSLATIONS["en,slack_webhook_format"]="Webhook URL should start with: https://hooks.slack.com/services/"
+  TRANSLATIONS["en,invalid_slack_webhook"]="Invalid Slack webhook URL. Please try again."
+  TRANSLATIONS["en,slack_linked"]="✅ Slack webhook successfully linked to Aztec Agent"
+  TRANSLATIONS["en,notification_channel_prompt"]="Select notification channel:"
+  TRANSLATIONS["en,notification_channel_telegram"]="1. Telegram only"
+  TRANSLATIONS["en,notification_channel_slack"]="2. Slack only"
+  TRANSLATIONS["en,notification_channel_both"]="3. Both Telegram and Slack"
+  TRANSLATIONS["en,notification_channel_invalid"]="Error: please enter 1, 2, or 3"
+  TRANSLATIONS["en,enter_slack_webhook"]="Enter Slack webhook URL: "
   TRANSLATIONS["en,single_validator_mode"]="🔹 Single validator mode selected"
   TRANSLATIONS["en,multi_validator_mode"]="🔹 Multiple validators mode selected"
   TRANSLATIONS["en,enter_validator_keys"]="Enter validator private keys (comma-separated with 0x, up to 10): "
@@ -1061,6 +1073,18 @@ init_languages() {
   TRANSLATIONS["ru,web3signer_kept"]="✅ web3signer оставлен без изменений"
   TRANSLATIONS["ru,enter_tg_token"]="Введите токен Telegram бота: "
   TRANSLATIONS["ru,enter_tg_chat_id"]="Введите ID Telegram чата: "
+  TRANSLATIONS["ru,slack_webhook_prompt"]="Введите URL Slack Webhook:"
+  TRANSLATIONS["ru,slack_webhook_valid"]="✅ Slack webhook действителен"
+  TRANSLATIONS["ru,slack_webhook_invalid"]="❌ Неверный URL Slack webhook"
+  TRANSLATIONS["ru,slack_webhook_format"]="URL webhook должен начинаться с: https://hooks.slack.com/services/"
+  TRANSLATIONS["ru,invalid_slack_webhook"]="Неверный URL Slack webhook. Пожалуйста, попробуйте снова."
+  TRANSLATIONS["ru,slack_linked"]="✅ Slack webhook успешно подключен к Aztec Agent"
+  TRANSLATIONS["ru,notification_channel_prompt"]="Выберите канал уведомлений:"
+  TRANSLATIONS["ru,notification_channel_telegram"]="1. Только Telegram"
+  TRANSLATIONS["ru,notification_channel_slack"]="2. Только Slack"
+  TRANSLATIONS["ru,notification_channel_both"]="3. И Telegram, и Slack"
+  TRANSLATIONS["ru,notification_channel_invalid"]="Ошибка: пожалуйста, введите 1, 2 или 3"
+  TRANSLATIONS["ru,enter_slack_webhook"]="Введите URL Slack webhook: "
   TRANSLATIONS["ru,single_validator_mode"]="🔹 Выбран режим одного валидатора"
   TRANSLATIONS["ru,multi_validator_mode"]="🔹 Выбран режим нескольких валидаторов"
   TRANSLATIONS["ru,enter_validator_keys"]="Введите приватные ключи валидаторов (c 0x через запятую, до 10): "
@@ -1708,6 +1732,18 @@ init_languages() {
   TRANSLATIONS["tr,web3signer_kept"]="✅ web3signer korundu"
   TRANSLATIONS["tr,enter_tg_token"]="Telegram bot tokenini girin: "
   TRANSLATIONS["tr,enter_tg_chat_id"]="Telegram chat ID'sini girin: "
+  TRANSLATIONS["tr,slack_webhook_prompt"]="Slack Webhook URL'sini girin:"
+  TRANSLATIONS["tr,slack_webhook_valid"]="✅ Slack webhook geçerli"
+  TRANSLATIONS["tr,slack_webhook_invalid"]="❌ Geçersiz Slack webhook URL'si"
+  TRANSLATIONS["tr,slack_webhook_format"]="Webhook URL'si şununla başlamalıdır: https://hooks.slack.com/services/"
+  TRANSLATIONS["tr,invalid_slack_webhook"]="Geçersiz Slack webhook URL'si. Lütfen tekrar deneyin."
+  TRANSLATIONS["tr,slack_linked"]="✅ Slack webhook başarıyla Aztec Agent'a bağlandı"
+  TRANSLATIONS["tr,notification_channel_prompt"]="Bildirim kanalını seçin:"
+  TRANSLATIONS["tr,notification_channel_telegram"]="1. Sadece Telegram"
+  TRANSLATIONS["tr,notification_channel_slack"]="2. Sadece Slack"
+  TRANSLATIONS["tr,notification_channel_both"]="3. Hem Telegram hem Slack"
+  TRANSLATIONS["tr,notification_channel_invalid"]="Hata: lütfen 1, 2 veya 3 girin"
+  TRANSLATIONS["tr,enter_slack_webhook"]="Slack webhook URL'sini girin: "
   TRANSLATIONS["tr,single_validator_mode"]="🔹 Tek validatör modu seçildi"
   TRANSLATIONS["tr,multi_validator_mode"]="🔹 Çoklu validatör modu seçildi"
   TRANSLATIONS["tr,enter_validator_keys"]="Validatör özel anahtarlarını girin (0x ile virgülle ayrılmış, en fazla 10): "
@@ -1976,7 +2012,7 @@ init_languages() {
   TRANSLATIONS["tr,claim_function_not_activated"]="Şu anda kontratta talep işlevi etkinleştirilmemiş"
 }
 
-SCRIPT_VERSION="2.7.3"
+SCRIPT_VERSION="2.7.4"
 ERROR_DEFINITIONS_VERSION="1.0.0"
 
 # Determine script directory for local file access (security: avoid remote code execution)
@@ -3104,39 +3140,108 @@ create_systemd_agent() {
     fi
   }
 
-  # === Проверка и получение TELEGRAM_BOT_TOKEN ===
-  if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
-    while true; do
-      echo -e "\n${BLUE}$(t "token_prompt")${NC}"
-      read -p "> " TELEGRAM_BOT_TOKEN
+  # Function to validate Slack webhook URL
+  validate_slack_webhook() {
+    local webhook_url=$1
+    # Check URL format
+    if [[ ! "$webhook_url" =~ ^https://hooks\.slack\.com/services/ ]]; then
+      return 1
+    fi
+    # Test webhook by sending a test message
+    local test_message=$(t "slack_linked")
+    local json_payload
+    if command -v jq >/dev/null 2>&1; then
+      json_payload=$(jq -n --arg text "$test_message" '{"text": $text}')
+    else
+      local escaped=$(echo "$test_message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+      json_payload="{\"text\": \"$escaped\"}"
+    fi
+    local response=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$webhook_url" \
+      -H "Content-Type: application/json" \
+      -d "$json_payload")
 
-      if validate_telegram_token "$TELEGRAM_BOT_TOKEN"; then
-        echo "TELEGRAM_BOT_TOKEN=\"$TELEGRAM_BOT_TOKEN\"" >> "$env_file"
+    if [[ "$response" == "200" ]]; then
+      return 0
+    else
+      return 1
+    fi
+  }
+
+  # === Select notification channel ===
+  if [ -z "$NOTIFICATION_CHANNEL" ]; then
+    echo -e "\n${BLUE}$(t "notification_channel_prompt")${NC}"
+    echo -e "$(t "notification_channel_telegram")"
+    echo -e "$(t "notification_channel_slack")"
+    echo -e "$(t "notification_channel_both")"
+    while true; do
+      read -p "$(t "choose_option_prompt") (1/2/3): " NOTIFICATION_CHANNEL
+      if [[ "$NOTIFICATION_CHANNEL" =~ ^[123]$ ]]; then
+        if ! grep -q "NOTIFICATION_CHANNEL" "$env_file"; then
+          echo "NOTIFICATION_CHANNEL=\"$NOTIFICATION_CHANNEL\"" >> "$env_file"
+        else
+          sed -i "s/^NOTIFICATION_CHANNEL=.*/NOTIFICATION_CHANNEL=\"$NOTIFICATION_CHANNEL\"/" "$env_file"
+        fi
         break
       else
-        echo -e "${RED}$(t "invalid_token")${NC}"
-        echo -e "${YELLOW}$(t "token_format")${NC}"
+        echo -e "${RED}$(t "notification_channel_invalid")${NC}"
       fi
     done
   fi
 
-  # === Проверка и получение TELEGRAM_CHAT_ID ===
-  if [ -z "$TELEGRAM_CHAT_ID" ]; then
-    while true; do
-      echo -e "\n${BLUE}$(t "chatid_prompt")${NC}"
-      read -p "> " TELEGRAM_CHAT_ID
+  # === Get Telegram credentials if channel is 1 (Telegram) or 3 (Both) ===
+  if [ "$NOTIFICATION_CHANNEL" == "1" ] || [ "$NOTIFICATION_CHANNEL" == "3" ]; then
+    # === Проверка и получение TELEGRAM_BOT_TOKEN ===
+    if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+      while true; do
+        echo -e "\n${BLUE}$(t "token_prompt")${NC}"
+        read -p "> " TELEGRAM_BOT_TOKEN
 
-      if [[ "$TELEGRAM_CHAT_ID" =~ ^-?[0-9]+$ ]]; then
-        if validate_telegram_chat "$TELEGRAM_BOT_TOKEN" "$TELEGRAM_CHAT_ID"; then
-          echo "TELEGRAM_CHAT_ID=\"$TELEGRAM_CHAT_ID\"" >> "$env_file"
+        if validate_telegram_token "$TELEGRAM_BOT_TOKEN"; then
+          echo "TELEGRAM_BOT_TOKEN=\"$TELEGRAM_BOT_TOKEN\"" >> "$env_file"
           break
         else
-          echo -e "${RED}$(t "invalid_chatid")${NC}"
+          echo -e "${RED}$(t "invalid_token")${NC}"
+          echo -e "${YELLOW}$(t "token_format")${NC}"
         fi
-      else
-        echo -e "${RED}$(t "chatid_number")${NC}"
-      fi
-    done
+      done
+    fi
+
+    # === Проверка и получение TELEGRAM_CHAT_ID ===
+    if [ -z "$TELEGRAM_CHAT_ID" ]; then
+      while true; do
+        echo -e "\n${BLUE}$(t "chatid_prompt")${NC}"
+        read -p "> " TELEGRAM_CHAT_ID
+
+        if [[ "$TELEGRAM_CHAT_ID" =~ ^-?[0-9]+$ ]]; then
+          if validate_telegram_chat "$TELEGRAM_BOT_TOKEN" "$TELEGRAM_CHAT_ID"; then
+            echo "TELEGRAM_CHAT_ID=\"$TELEGRAM_CHAT_ID\"" >> "$env_file"
+            break
+          else
+            echo -e "${RED}$(t "invalid_chatid")${NC}"
+          fi
+        else
+          echo -e "${RED}$(t "chatid_number")${NC}"
+        fi
+      done
+    fi
+  fi
+
+  # === Get Slack webhook if channel is 2 (Slack) or 3 (Both) ===
+  if [ "$NOTIFICATION_CHANNEL" == "2" ] || [ "$NOTIFICATION_CHANNEL" == "3" ]; then
+    if [ -z "$SLACK_WEBHOOK_URL" ]; then
+      while true; do
+        echo -e "\n${BLUE}$(t "slack_webhook_prompt")${NC}"
+        read -p "> " SLACK_WEBHOOK_URL
+
+        if validate_slack_webhook "$SLACK_WEBHOOK_URL"; then
+          echo "SLACK_WEBHOOK_URL=\"$SLACK_WEBHOOK_URL\"" >> "$env_file"
+          break
+        else
+          echo -e "${RED}$(t "invalid_slack_webhook")${NC}"
+          echo -e "${YELLOW}$(t "slack_webhook_format")${NC}"
+        fi
+      done
+    fi
   fi
 
   # === Запрос о дополнительных уведомлениях ===
@@ -3212,6 +3317,8 @@ CONTRACT_ADDRESS_MAINNET="$CONTRACT_ADDRESS_MAINNET"
 FUNCTION_SIG="$FUNCTION_SIG"
 TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN"
 TELEGRAM_CHAT_ID="$TELEGRAM_CHAT_ID"
+SLACK_WEBHOOK_URL="$SLACK_WEBHOOK_URL"
+NOTIFICATION_CHANNEL="$NOTIFICATION_CHANNEL"
 LOG_FILE="$LOG_FILE"
 LANG="$LANG"
 
@@ -3352,10 +3459,32 @@ if [ "\$current_size" -gt "\$MAX_SIZE" ]; then
   current_time=\$(date '+%Y-%m-%d %H:%M:%S')
   message="\$(t "log_size_warning")%0A\$(t "server_info" "\$ip")%0A\$(t "file_info" "\$LOG_FILE")%0A\$(t "size_info" "\$current_size")%0A\$(t "time_info" "\$current_time")"
 
-  curl -s -X POST "https://api.telegram.org/bot\$TELEGRAM_BOT_TOKEN/sendMessage" \\
-    -d chat_id="\$TELEGRAM_CHAT_ID" \\
-    -d text="\$message" \\
-    -d parse_mode="Markdown" >/dev/null
+  # Send to Telegram if channel is 1 or 3 (or not set for backwards compatibility)
+  if [ "\$NOTIFICATION_CHANNEL" == "1" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ] || [ -z "\$NOTIFICATION_CHANNEL" ]; then
+    if [ -n "\$TELEGRAM_BOT_TOKEN" ] && [ -n "\$TELEGRAM_CHAT_ID" ]; then
+      curl -s -X POST "https://api.telegram.org/bot\$TELEGRAM_BOT_TOKEN/sendMessage" \\
+        -d chat_id="\$TELEGRAM_CHAT_ID" \\
+        -d text="\$message" \\
+        -d parse_mode="Markdown" >/dev/null
+    fi
+  fi
+	  # Send to Slack if channel is 2 or 3
+	  if [ "\$NOTIFICATION_CHANNEL" == "2" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ]; then
+	    if [ -n "\$SLACK_WEBHOOK_URL" ]; then
+	      clean_message=\$(echo "\$message" | sed 's/%0A/\n/g')
+	      # Convert Telegram Markdown links ([text](url)) to Slack mrkdwn (<url|text>)
+	      clean_message=\$(echo "\$clean_message" | sed -E 's/\\[([^]]+)\\]\\((https?:\\/\\/[^)]+)\\)/<\\2|\\1>/g')
+	      if command -v jq >/dev/null 2>&1; then
+	        json_payload=\$(jq -n --arg text "\$clean_message" '{"text": \$text}')
+	      else
+	        escaped=\$(echo "\$clean_message" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | tr '\n' ' ')
+	        json_payload="{\"text\": \"\$escaped\"}"
+	      fi
+	      curl -s -X POST "\$SLACK_WEBHOOK_URL" \\
+	        -H "Content-Type: application/json" \\
+	        -d "\$json_payload" >/dev/null
+	    fi
+	  fi
 else
   {
     echo "="
@@ -3374,10 +3503,46 @@ log() {
 # === Функция для отправки уведомлений в Telegram ===
 send_telegram_message() {
   local message="\$1"
-  curl -s -X POST "https://api.telegram.org/bot\$TELEGRAM_BOT_TOKEN/sendMessage" \\
-    -d chat_id="\$TELEGRAM_CHAT_ID" \\
-    -d text="\$message" \\
-    -d parse_mode="Markdown" >/dev/null
+  if [ -n "\$TELEGRAM_BOT_TOKEN" ] && [ -n "\$TELEGRAM_CHAT_ID" ]; then
+    curl -s -X POST "https://api.telegram.org/bot\$TELEGRAM_BOT_TOKEN/sendMessage" \\
+      -d chat_id="\$TELEGRAM_CHAT_ID" \\
+      -d text="\$message" \\
+      -d parse_mode="Markdown" >/dev/null
+  fi
+}
+
+# === Функция для отправки уведомлений в Slack ===
+	send_slack_message() {
+	  local message="\$1"
+	  if [ -n "\$SLACK_WEBHOOK_URL" ]; then
+	    # Convert Telegram-style formatting to Slack mrkdwn
+	    local clean_message=\$(echo "\$message" | sed 's/%0A/\n/g')
+	    # Convert Telegram Markdown links ([text](url)) to Slack mrkdwn (<url|text>)
+	    clean_message=\$(echo "\$clean_message" | sed -E 's/\\[([^]]+)\\]\\((https?:\\/\\/[^)]+)\\)/<\\2|\\1>/g')
+	    local json_payload
+	    if command -v jq >/dev/null 2>&1; then
+	      json_payload=\$(jq -n --arg text "\$clean_message" '{"text": \$text}')
+	    else
+	      # Fallback: basic escaping for JSON (escape backslashes, quotes, and newlines)
+      local escaped=\$(echo "\$clean_message" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | tr '\n' ' ')
+      json_payload="{\"text\": \"\$escaped\"}"
+    fi
+    curl -s -X POST "\$SLACK_WEBHOOK_URL" \\
+      -H "Content-Type: application/json" \\
+      -d "\$json_payload" >/dev/null
+  fi
+}
+
+# === Unified notification function based on NOTIFICATION_CHANNEL ===
+send_notification() {
+  local message="\$1"
+  # NOTIFICATION_CHANNEL: 1=Telegram, 2=Slack, 3=Both
+  if [ "\$NOTIFICATION_CHANNEL" == "1" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ] || [ -z "\$NOTIFICATION_CHANNEL" ]; then
+    send_telegram_message "\$message"
+  fi
+  if [ "\$NOTIFICATION_CHANNEL" == "2" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ]; then
+    send_slack_message "\$message"
+  fi
 }
 
 # === Helper: send Telegram message and return message_id ===
@@ -3455,7 +3620,7 @@ check_critical_errors() {
         log "Critical error detected: \$pattern"
         current_time=\$(date '+%Y-%m-%d %H:%M:%S')
         full_message="\$(t "critical_error_found")%0A\$(t "server_info" "\$ip")%0A\$(t "error_prefix") \$message%0A\$(t "solution_prefix")%0A\$solution%0A\$(t "time_info" "\$current_time")"
-        send_telegram_message "\$full_message"
+        send_notification "\$full_message"
         exit 1
       fi
     done
@@ -3499,7 +3664,7 @@ check_critical_errors() {
             log "Critical error detected: \$pattern"
             current_time=\$(date '+%Y-%m-%d %H:%M:%S')
             full_message="\$(t "critical_error_found")%0A\$(t "server_info" "\$ip")%0A\$(t "error_prefix") \$message%0A\$(t "solution_prefix")%0A\$solution%0A\$(t "time_info" "\$current_time")"
-            send_telegram_message "\$full_message"
+            send_notification "\$full_message"
             exit 1
           fi
         fi
@@ -3674,19 +3839,27 @@ check_committee() {
       committee_message+="\$(t "status_block_mined")%0A"
       committee_message+="\$(t "status_block_missed")%0A"
       committee_message+="\$(t "status_block_proposed")%0A"
-      committee_message+="%0A\$(t "server_info" "\$ip")%0A"
-      committee_message+="\$(t "time_info" "\$current_time")"
+	      committee_message+="%0A\$(t "server_info" "\$ip")%0A"
+	      committee_message+="\$(t "time_info" "\$current_time")"
 
-      debug_log "Sending committee message for validator \$v_lower: \$committee_message"
-      message_id=\$(send_telegram_message_get_id "\$committee_message")
-      if [ -n "\$message_id" ] && [ "\$message_id" != "null" ]; then
-        echo "\$message_id" > "\$epoch_msg_file"
-      fi
-      printf "%s " "\${slots_arr[@]}" > "\$epoch_state_file"
-      # Очистим файл учета слотов для этого валидатора
-      : > "$AGENT_SCRIPT_PATH/aztec_last_committee_slot_\${v_lower}"
-    done
-    log "Committee selection notification sent for epoch \$epoch: found validators \${found_validators[*]}"
+	      debug_log "Sending committee message for validator \$v_lower: \$committee_message"
+	      message_id=""
+	      # Telegram: keep message_id so we can edit the board in-place
+	      if [ "\$NOTIFICATION_CHANNEL" == "1" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ] || [ -z "\$NOTIFICATION_CHANNEL" ]; then
+	        message_id=\$(send_telegram_message_get_id "\$committee_message")
+	        if [ -n "\$message_id" ] && [ "\$message_id" != "null" ]; then
+	          echo "\$message_id" > "\$epoch_msg_file"
+	        fi
+	      fi
+	      # Slack: incoming webhooks can't edit messages, so send the initial board as a new message
+	      if [ "\$NOTIFICATION_CHANNEL" == "2" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ]; then
+	        send_slack_message "\$committee_message"
+	      fi
+	      printf "%s " "\${slots_arr[@]}" > "\$epoch_state_file"
+	      # Очистим файл учета слотов для этого валидатора
+	      : > "$AGENT_SCRIPT_PATH/aztec_last_committee_slot_\${v_lower}"
+	    done
+	    log "Committee selection notification sent for epoch \$epoch: found validators \${found_validators[*]}"
   else
     debug_log "Already notified for epoch \$epoch"
   fi
@@ -3758,28 +3931,36 @@ check_committee() {
         updated_message+="\$(t "status_attestation_missed")%0A"
         updated_message+="\$(t "status_block_mined")%0A"
         updated_message+="\$(t "status_block_missed")%0A"
-        updated_message+="\$(t "status_block_proposed")%0A"
-        updated_message+="%0A\$(t "server_info" "\$ip")%0A"
-        updated_message+="\$(t "time_info" "\$current_time")"
+	        updated_message+="\$(t "status_block_proposed")%0A"
+	        updated_message+="%0A\$(t "server_info" "\$ip")%0A"
+	        updated_message+="\$(t "time_info" "\$current_time")"
 
-        if [ -f "\$epoch_msg_file" ]; then
-          message_id=\$(cat "\$epoch_msg_file")
-          if [ -n "\$message_id" ]; then
-            debug_log "Editing committee message (id=\$message_id) for epoch \$epoch, slot \$slot, validator \$v_lower"
-            edit_telegram_message "\$message_id" "\$updated_message"
-          else
-            debug_log "Message id missing; sending a fallback message"
-            send_telegram_message "\$updated_message"
-          fi
-        else
-          debug_log "Message id file not found; sending a fallback message"
-          send_telegram_message "\$updated_message"
-        fi
+	        # Telegram: edit original message when possible
+	        if [ "\$NOTIFICATION_CHANNEL" == "1" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ] || [ -z "\$NOTIFICATION_CHANNEL" ]; then
+	          if [ -f "\$epoch_msg_file" ]; then
+	            message_id=\$(cat "\$epoch_msg_file")
+	            if [ -n "\$message_id" ]; then
+	              debug_log "Editing committee message (id=\$message_id) for epoch \$epoch, slot \$slot, validator \$v_lower"
+	              edit_telegram_message "\$message_id" "\$updated_message"
+	            else
+	              debug_log "Message id missing; sending a fallback Telegram message"
+	              send_telegram_message "\$updated_message"
+	            fi
+	          else
+	            debug_log "Message id file not found; sending a fallback Telegram message"
+	            send_telegram_message "\$updated_message"
+	          fi
+	        fi
 
-        echo "\$last_slot_key" >> "\$last_slot_file"
-        debug_log "Updated slot \$slot_idx for epoch \$epoch with icon \$slot_icon for \$v_lower"
-        log "Updated committee stats for epoch \$epoch, slot \$slot, validator \$v_lower"
-      else
+	        # Slack: incoming webhooks can't edit messages, so send a new message for each update
+	        if [ "\$NOTIFICATION_CHANNEL" == "2" ] || [ "\$NOTIFICATION_CHANNEL" == "3" ]; then
+	          send_slack_message "\$updated_message"
+	        fi
+
+	        echo "\$last_slot_key" >> "\$last_slot_file"
+	        debug_log "Updated slot \$slot_idx for epoch \$epoch with icon \$slot_icon for \$v_lower"
+	        log "Updated committee stats for epoch \$epoch, slot \$slot, validator \$v_lower"
+	      else
         debug_log "No mapped status for slot \$slot for \$v_lower"
       fi
     done
@@ -3798,7 +3979,7 @@ check_blocks() {
     current_time=\$(date '+%Y-%m-%d %H:%M:%S')
     message="\$(t "container_not_found")%0A\$(t "server_info" "\$ip")%0A\$(t "time_info" "\$current_time")"
     debug_log "Sending container not found message"
-    send_telegram_message "\$message"
+    send_notification "\$message"
     exit 1
   fi
   debug_log "Container found: \$container_id"
@@ -3819,7 +4000,7 @@ check_blocks() {
     current_time=\$(date '+%Y-%m-%d %H:%M:%S')
     message="\$(t "block_fetch_error")%0A\$(t "server_info" "\$ip")%0A\$(t "rpc_info" "\$RPC_URL")%0A\$(t "error_info" "\$block_hex")%0A\$(t "time_info" "\$current_time")"
     debug_log "Sending block fetch error message"
-    send_telegram_message "\$message"
+    send_notification "\$message"
     exit 1
   fi
 
@@ -3836,7 +4017,7 @@ check_blocks() {
     current_time=\$(date '+%Y-%m-%d %H:%M:%S')
     message="\$(t "no_block_in_logs")%0A\$(t "server_info" "\$ip")%0A\$(t "block_info" "\$block_number")%0A\$(t "time_info" "\$current_time")"
     debug_log "Sending no block in logs message"
-    send_telegram_message "\$message"
+    send_notification "\$message"
     exit 1
   fi
 
@@ -3856,7 +4037,7 @@ check_blocks() {
     current_time=\$(date '+%Y-%m-%d %H:%M:%S')
     message="\$(t "failed_extract_block")%0A\$(t "server_info" "\$ip")%0A\$(t "line_info" "\$latest_log_line")%0A\$(t "time_info" "\$current_time")"
     debug_log "Sending failed extract block message"
-    send_telegram_message "\$message"
+    send_notification "\$message"
     exit 1
   fi
 
@@ -3872,7 +4053,7 @@ check_blocks() {
       current_time=\$(date '+%Y-%m-%d %H:%M:%S')
       message="\$(t "node_behind" "\$blocks_diff")%0A\$(t "server_info" "\$ip")%0A\$(t "block_info" "\$block_number")%0A\$(t "log_block_info" "\$log_block_number")%0A\$(t "time_info" "\$current_time")"
       debug_log "Sending node behind message, diff=\$blocks_diff"
-      send_telegram_message "\$message"
+      send_notification "\$message"
     fi
   fi
 
@@ -3890,7 +4071,7 @@ check_blocks() {
     fi
 
     debug_log "Sending initialization message"
-    send_telegram_message "\$message"
+    send_notification "\$message"
     touch "\$LOG_FILE.initialized"
     echo "v.\$VERSION" >> "\$LOG_FILE"
     echo "INITIALIZED" >> "\$LOG_FILE"
@@ -3991,7 +4172,7 @@ check_publisher_balances() {
     done
     message+="\$(t "server_info" "\$ip")%0A"
     message+="\$(t "time_info" "\$current_time")"
-    send_telegram_message "\$message"
+    send_notification "\$message"
   else
     debug_log "All publisher balances are above threshold"
   fi
@@ -4631,18 +4812,44 @@ update_aztec_node() {
 downgrade_aztec_node() {
     echo -e "\n${GREEN}=== $(t "downgrade_title") ===${NC}"
 
-    # Получаем список доступных тегов с Docker Hub
+    # Получаем список доступных тегов с Docker Hub с обработкой пагинации
     echo -e "${YELLOW}$(t "downgrade_fetching")${NC}"
-    TAGS=$(curl -s https://hub.docker.com/v2/repositories/aztecprotocol/aztec/tags/?page_size=100 | jq -r '.results[].name' | sort -Vr)
 
-    if [ -z "$TAGS" ]; then
+    # Собираем все теги с нескольких страниц
+    ALL_TAGS=""
+    PAGE=1
+    while true; do
+        PAGE_TAGS=$(curl -s "https://hub.docker.com/v2/repositories/aztecprotocol/aztec/tags/?page=$PAGE&page_size=100" | jq -r '.results[].name' 2>/dev/null)
+
+        if [ -z "$PAGE_TAGS" ] || [ "$PAGE_TAGS" = "null" ] || [ "$PAGE_TAGS" = "" ]; then
+            break
+        fi
+
+        ALL_TAGS="$ALL_TAGS"$'\n'"$PAGE_TAGS"
+        PAGE=$((PAGE + 1))
+
+        # Ограничим максимальное количество страниц для безопасности
+        if [ $PAGE -gt 10 ]; then
+            break
+        fi
+    done
+
+    if [ -z "$ALL_TAGS" ]; then
         echo -e "${RED}$(t "downgrade_fetch_error")${NC}"
         return 1
     fi
 
+    # Фильтруем теги: оставляем только latest и стабильные версии (формат X.Y.Z)
+    FILTERED_TAGS=$(echo "$ALL_TAGS" | grep -E '^(latest|[0-9]+\.[0-9]+\.[0-9]+)$' | grep -v -E '.*-(rc|night|alpha|beta|dev|test|unstable|preview).*' | sort -Vr | uniq)
+
     # Выводим список тегов с нумерацией
+    if [ -z "$FILTERED_TAGS" ]; then
+        echo -e "${RED}$(t "downgrade_no_stable_versions")${NC}"
+        return 1
+    fi
+
     echo -e "\n${CYAN}$(t "downgrade_available")${NC}"
-    select TAG in $TAGS; do
+    select TAG in $FILTERED_TAGS; do
         if [ -n "$TAG" ]; then
             break
         else
@@ -4902,17 +5109,49 @@ wei_to_token() {
 }
 
 # Функция для отправки уведомления в Telegram
-send_telegram_notification() {
+# Unified notification function for main script
+send_unified_notification() {
     local message="$1"
-    if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
-        echo -e "${YELLOW}Telegram notification not sent: missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID${NC}"
-        return 1
+    local sent=false
+
+    # Send to Telegram if channel is 1 or 3 (or not set for backwards compatibility)
+    if [ "$NOTIFICATION_CHANNEL" == "1" ] || [ "$NOTIFICATION_CHANNEL" == "3" ] || [ -z "$NOTIFICATION_CHANNEL" ]; then
+        if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+                -d chat_id="$TELEGRAM_CHAT_ID" \
+                -d text="$message" \
+                -d parse_mode="Markdown" > /dev/null
+            sent=true
+        fi
     fi
 
-    curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
-        -d chat_id="$TELEGRAM_CHAT_ID" \
-        -d text="$message" \
-        -d parse_mode="Markdown" > /dev/null
+    # Send to Slack if channel is 2 or 3
+    if [ "$NOTIFICATION_CHANNEL" == "2" ] || [ "$NOTIFICATION_CHANNEL" == "3" ]; then
+        if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            local json_payload
+            if command -v jq >/dev/null 2>&1; then
+                json_payload=$(jq -n --arg text "$message" '{"text": $text}')
+            else
+                # Fallback: basic escaping for JSON
+                local escaped=$(echo "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+                json_payload="{\"text\": \"$escaped\"}"
+            fi
+            curl -s -X POST "$SLACK_WEBHOOK_URL" \
+                -H "Content-Type: application/json" \
+                -d "$json_payload" > /dev/null
+            sent=true
+        fi
+    fi
+
+    if [ "$sent" = false ]; then
+        echo -e "${YELLOW}Notification not sent: missing credentials for configured channel${NC}"
+        return 1
+    fi
+}
+
+send_telegram_notification() {
+    local message="$1"
+    send_unified_notification "$message"
 }
 
 # Функция для проверки очереди валидаторов (пакетная обработка)
@@ -4949,10 +5188,7 @@ check_validator_queue(){
 
 📞 *Contact developer:* https://t.me/+zEaCtoXYYwIyZjQ0"
 
-        if [ -n "${TELEGRAM_BOT_TOKEN-}" ] && [ -n "${TELEGRAM_CHAT_ID-}" ]; then
-            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
-                -d chat_id="$TELEGRAM_CHAT_ID" -d text="$message" -d parse_mode="Markdown" >/dev/null 2>&1
-        fi
+        send_unified_notification "$message"
     }
 
     check_single_validator(){
@@ -5106,9 +5342,26 @@ create_monitor_script(){
 📋 *Check frequency:* Hourly
 🔔 *Notifications:* Position changes"
 
-    if [ -n "${TELEGRAM_BOT_TOKEN-}" ] && [ -n "${TELEGRAM_CHAT_ID-}" ]; then
-        curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
-            -d chat_id="$TELEGRAM_CHAT_ID" -d text="$start_message" -d parse_mode="Markdown" >/dev/null 2>&1
+    # Send start notification via configured channel
+    if [ "$NOTIFICATION_CHANNEL" == "1" ] || [ "$NOTIFICATION_CHANNEL" == "3" ] || [ -z "$NOTIFICATION_CHANNEL" ]; then
+        if [ -n "${TELEGRAM_BOT_TOKEN-}" ] && [ -n "${TELEGRAM_CHAT_ID-}" ]; then
+            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+                -d chat_id="$TELEGRAM_CHAT_ID" -d text="$start_message" -d parse_mode="Markdown" >/dev/null 2>&1
+        fi
+    fi
+    if [ "$NOTIFICATION_CHANNEL" == "2" ] || [ "$NOTIFICATION_CHANNEL" == "3" ]; then
+        if [ -n "${SLACK_WEBHOOK_URL-}" ]; then
+            local json_payload
+            if command -v jq >/dev/null 2>&1; then
+                json_payload=$(jq -n --arg text "$start_message" '{"text": $text}')
+            else
+                local escaped=$(echo "$start_message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+                json_payload="{\"text\": \"$escaped\"}"
+            fi
+            curl -s -X POST "$SLACK_WEBHOOK_URL" \
+                -H "Content-Type: application/json" \
+                -d "$json_payload" >/dev/null 2>&1
+        fi
     fi
 
     cat > "$MONITOR_DIR/$script_name" <<'EOF'
@@ -5123,6 +5376,8 @@ LAST_POSITION_FILE="__POSFILE__"
 LOG_FILE="__LOGFILE__"
 TELEGRAM_BOT_TOKEN="__TBOT__"
 TELEGRAM_CHAT_ID="__TCHAT__"
+SLACK_WEBHOOK_URL="__SLACK__"
+NOTIFICATION_CHANNEL="__CHANNEL__"
 
 CURL_CONNECT_TIMEOUT=15
 CURL_MAX_TIME=45
@@ -5150,6 +5405,39 @@ send_telegram(){
     fi
     curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
         -d chat_id="$TELEGRAM_CHAT_ID" -d text="$message" -d parse_mode="Markdown" >/dev/null
+}
+
+	send_slack(){
+	    local message="$1"
+	    if [ -z "$SLACK_WEBHOOK_URL" ]; then
+	        log_message "No Slack webhook"
+	        return 1
+	    fi
+	    # Convert Telegram Markdown links ([text](url)) to Slack mrkdwn (<url|text>)
+	    message=$(echo "$message" | sed -E 's/\\[([^]]+)\\]\\((https?:\\/\\/[^)]+)\\)/<\\2|\\1>/g')
+	    local json_payload
+	    if command -v jq >/dev/null 2>&1; then
+	        json_payload=$(jq -n --arg text "$message" '{"text": $text}')
+	    else
+	        local escaped=$(echo "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+        json_payload="{\"text\": \"$escaped\"}"
+    fi
+    curl -s -X POST "$SLACK_WEBHOOK_URL" \
+        -H "Content-Type: application/json" \
+        -d "$json_payload" >/dev/null
+}
+
+send_notification(){
+    local message="$1"
+    local result=0
+    # NOTIFICATION_CHANNEL: 1=Telegram, 2=Slack, 3=Both
+    if [ "$NOTIFICATION_CHANNEL" == "1" ] || [ "$NOTIFICATION_CHANNEL" == "3" ] || [ -z "$NOTIFICATION_CHANNEL" ]; then
+        send_telegram "$message" || result=1
+    fi
+    if [ "$NOTIFICATION_CHANNEL" == "2" ] || [ "$NOTIFICATION_CHANNEL" == "3" ]; then
+        send_slack "$message" || result=1
+    fi
+    return $result
 }
 
 format_date(){
@@ -5210,10 +5498,7 @@ monitor_position(){
 ⚠️ *Issue:* Possible problems with Dashtec API
 📞 *Contact developer:* https://t.me/+zEaCtoXYYwIyZjQ0"
 
-        if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
-            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
-                -d chat_id="$TELEGRAM_CHAT_ID" -d text="$message" -d parse_mode="Markdown" >/dev/null
-        fi
+        send_notification "$message"
     }
 
     # Формируем URL для очереди в зависимости от сети
@@ -5290,7 +5575,7 @@ monitor_position(){
 🏷️ *Index:* $index
 ⏳ *Checked at:* $(date '+%d.%m.%Y %H:%M UTC')"
             fi
-            if send_telegram "$message"; then
+            if send_notification "$message"; then
                 log_message "Notification sent"
             else
                 log_message "Failed to send notification"
@@ -5342,7 +5627,7 @@ monitor_position(){
 ⌛ *Last Queue Position:* $last_position
 🔗 *Validator Link:* $validator_link/$VALIDATOR_ADDRESS
 ⏳ *Checked at:* $(date '+%d.%m.%Y %H:%M UTC')"
-                        send_telegram "$message" && log_message "Active set notification sent"
+                        send_notification "$message" && log_message "Active set notification sent"
                     else
                         # Формируем ссылку для очереди в зависимости от сети
                         local queue_link
@@ -5365,7 +5650,7 @@ monitor_position(){
 • Technical issue with the validator
 
 📊 Check queue: $queue_link"
-                        send_telegram "$message" && log_message "Removal notification sent"
+                        send_notification "$message" && log_message "Removal notification sent"
                     fi
                 else
                     log_message "Active set API returned non-ok status: $api_status_active"
@@ -5386,7 +5671,7 @@ monitor_position(){
 
 ℹ️ *Note:* Could not verify active set status (API error)
 📊 Check status: $queue_link"
-                    send_telegram "$message" && log_message "General removal notification sent"
+                    send_notification "$message" && log_message "General removal notification sent"
                 fi
             else
                 # Формируем ссылку для очереди в зависимости от сети
@@ -5406,7 +5691,7 @@ monitor_position(){
 
 ℹ️ *Note:* Could not verify active set status
 📊 Check status: $queue_link"
-                send_telegram "$message" && log_message "General removal notification sent"
+                send_notification "$message" && log_message "General removal notification sent"
             fi
 
             # Очищаем ресурсы в любом случае
@@ -5438,6 +5723,8 @@ EOF
     sed -i "s|__LOGFILE__|$log_file|g" "$MONITOR_DIR/$script_name"
     sed -i "s|__TBOT__|${TELEGRAM_BOT_TOKEN-}|g" "$MONITOR_DIR/$script_name"
     sed -i "s|__TCHAT__|${TELEGRAM_CHAT_ID-}|g" "$MONITOR_DIR/$script_name"
+    sed -i "s|__SLACK__|${SLACK_WEBHOOK_URL-}|g" "$MONITOR_DIR/$script_name"
+    sed -i "s|__CHANNEL__|${NOTIFICATION_CHANNEL-}|g" "$MONITOR_DIR/$script_name"
 
     chmod +x "$MONITOR_DIR/$script_name"
     if ! crontab -l 2>/dev/null | grep -q "$MONITOR_DIR/$script_name"; then
